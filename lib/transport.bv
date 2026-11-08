@@ -244,7 +244,17 @@ defn journey_transport_progress(transport: JourneyTransport, events: Int) -> Int
     };
     when transport.state == JT_HTTP_RECV { term journey_transport_http_progress(transport); };
     when transport.state == JT_UPGRADE_RECV { term journey_transport_upgrade_progress(transport); };
-    when transport.state == JT_LIVE && (events & POLL_IN) != 0 { term journey_transport_receive(transport); };
+    // 2026-11-08: a live receive must NOT return 1. Value 1 is the HTTP-framed
+    // completion signal the driver routes to its HTTP handler; returning it for
+    // buffered live bytes made the driver call the HTTP body extractor on a
+    // live transport (state != JT_HTTP_DONE), which traps. Buffer the bytes and
+    // report "no completion" (0); a negative result still fails the transport.
+    // The caller drains buffered frames via journey_transport_next.
+    when transport.state == JT_LIVE && (events & POLL_IN) != 0 {
+        let received: Int = journey_transport_receive(transport);
+        when received < 0 { term received; };
+        term 0;
+    };
     term 0;
 };
 
